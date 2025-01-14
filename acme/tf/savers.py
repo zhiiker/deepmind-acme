@@ -27,7 +27,6 @@ from acme.utils import signals
 from acme.utils import paths
 import sonnet as snt
 import tensorflow as tf
-import tensorflow_probability as tfp
 import tree
 
 from tensorflow.python.saved_model import revived_types
@@ -151,23 +150,38 @@ class Checkpointer:
         time.time() - self._last_saved < 60 * self._time_delta_minutes):
       return False
 
+    checkpoint_manager: tf.train.CheckpointManager = self.checkpoint_manager
     # Save any checkpoints.
-    logging.info('Saving checkpoint: %s', self._checkpoint_manager.directory)
-    self._checkpoint_manager.save()
+    logging.info('Saving checkpoint: %s', checkpoint_manager.directory)
+    checkpoint_manager.save()
     self._last_saved = time.time()
 
     return True
 
   def restore(self):
+    """Restore from most recent checkpoint."""
+
     # Restore from the most recent checkpoint (if it exists).
-    checkpoint_to_restore = self._checkpoint_manager.latest_checkpoint
+    checkpoint_to_restore = self.checkpoint_manager.latest_checkpoint
     logging.info('Attempting to restore checkpoint: %s',
                  checkpoint_to_restore)
     self._checkpoint.restore(checkpoint_to_restore)
 
   @property
   def directory(self):
-    return self._checkpoint_manager.directory
+    return self.checkpoint_manager.directory
+
+  @property
+  def checkpoint_manager(self) -> tf.train.CheckpointManager:
+    if not self._enable_checkpointing:
+      raise ValueError(
+          'Check-point not enabled. No checkpoint manager available.'
+      )
+
+    # At this point, _enable_checkpointing is true, so _checkpoint_manager
+    # should not be None.
+    assert self._checkpoint_manager is not None
+    return self._checkpoint_manager
 
 
 class CheckpointingRunner(core.Worker):
@@ -272,7 +286,7 @@ class Snapshotter:
       *,
       directory: str = '~/acme/',
       time_delta_minutes: float = 30.0,
-      snapshot_ttl_seconds: int = _DEFAULT_SNAPSHOT_TTL,
+      snapshot_ttl_seconds: int | None = _DEFAULT_SNAPSHOT_TTL,
   ):
     """Builds the saver object.
 
@@ -280,7 +294,8 @@ class Snapshotter:
       objects_to_save: Mapping specifying what to snapshot.
       directory: Which directory to put the snapshot in.
       time_delta_minutes: How often to save the snapshot, in minutes.
-      snapshot_ttl_seconds: TTL (time to leave) in seconds for snapshots.
+      snapshot_ttl_seconds: TTL (time to live) in seconds for snapshots. If
+        `None`, then snapshots will be created in `directory` without a TTL.
     """
     objects_to_save = objects_to_save or {}
 
@@ -333,6 +348,8 @@ class Snapshot(tf.Module):
 
   @tf.function
   def __call__(self, *args, **kwargs):
+    if self._module is None:
+      raise ValueError('_module not set')
     return self._module(*args, **kwargs)
 
   @property
@@ -375,19 +392,10 @@ def make_snapshot(module: snt.Module):
          'which is required for snapshotting; run '
          'create_variables to add this annotation.').format(module.name))
 
-  # This function will return the object as a composite tensor if it is a
-  # distribution and will otherwise return it with no changes.
-  def as_composite(obj):
-    if isinstance(obj, tfp.distributions.Distribution):
-      return tfp.experimental.as_composite(obj)
-    else:
-      return obj
-
-  # Replace any distributions returned by the module with composite tensors and
-  # wrap it up in tf.function so we can process it properly.
+  # Wrap the module up in tf.function so we can process it properly.
   @tf.function
   def wrapped_module(*args, **kwargs):
-    return tree.map_structure(as_composite, module(*args, **kwargs))
+    return module(*args, **kwargs)
 
   # pylint: disable=protected-access
   snapshot = Snapshot()

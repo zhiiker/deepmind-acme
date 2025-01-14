@@ -32,8 +32,9 @@ class MPOConfig:
   discrete_policy: bool = False
 
   # Specification of the type of experience the learner will consume.
-  experience_type: mpo_types.ExperienceType = mpo_types.FromTransitions(
-      n_step=5)
+  experience_type: mpo_types.ExperienceType = dataclasses.field(
+      default_factory=lambda: mpo_types.FromTransitions(n_step=5)
+  )
   num_stacked_observations: int = 1
   # Optional data-augmentation transformation for observations.
   observation_transform: Optional[Callable[[types.NestedTensor],
@@ -53,7 +54,7 @@ class MPOConfig:
   value_tx_pair: rlax.TxPair = rlax.IDENTITY_PAIR
   use_retrace: bool = False
   retrace_lambda: float = 0.95
-  reward_clip: float = np.float32('inf')
+  reward_clip: float = np.float32('inf')  # pytype: disable=annotation-type-mismatch  # numpy-scalars
   use_online_policy_to_bootstrap: bool = False
   use_stale_state: bool = False
 

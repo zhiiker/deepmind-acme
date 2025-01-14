@@ -48,10 +48,13 @@ InferenceServerHandler = TypeVar('InferenceServerHandler')
 class InferenceServer(Generic[InferenceServerHandler]):
   """Centralised, batched inference server."""
 
-  def __init__(self, handler: InferenceServerHandler,
-               variable_source: acme.VariableSource,
-               devices: Sequence[jax.xla.Device],
-               config: InferenceServerConfig):
+  def __init__(
+      self,
+      handler: InferenceServerHandler,
+      variable_source: acme.VariableSource,
+      devices: Sequence[jax.Device],
+      config: InferenceServerConfig,
+  ):
     """Constructs an inference server object.
 
     Args:
@@ -71,7 +74,9 @@ class InferenceServer(Generic[InferenceServerHandler]):
     self._device_params = [None] * len(self._devices)
     self._device_params_ids = [None] * len(self._devices)
     self._mutex = threading.Lock()
-    self._handler = jax.tree_map(self._build_handler, handler, is_leaf=callable)
+    self._handler = jax.tree_util.tree_map(
+        self._build_handler, handler, is_leaf=callable
+    )
 
   @property
   def handler(self) -> InferenceServerHandler:
@@ -94,6 +99,9 @@ class InferenceServer(Generic[InferenceServerHandler]):
           client=self._variable_source,
           key=self._keys,
           update_period=self._config.update_period)
+
+    if self._variable_client is None:
+      raise ValueError('_variable_client not set')
 
     params = self._variable_client.params
     device_idx = self._call_cnt % len(self._devices)
@@ -131,9 +139,10 @@ class InferenceServer(Generic[InferenceServerHandler]):
       return handler(*args_with_dereferenced_params,
                      **kwargs_with_dereferenced_params)
 
+    max_parallelism = 2 * max(len(self._devices), self._config.batch_size)
     return lp.batched_handler(
         batch_size=self._config.batch_size,
         timeout=self._config.timeout,
         pad_batch=True,
-        max_parallelism=2 * len(self._devices))(
-            dereference_params_and_call_handler)
+        max_parallelism=max_parallelism,
+    )(dereference_params_and_call_handler)

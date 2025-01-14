@@ -312,8 +312,7 @@ class CQLLearner(acme.Learner):
                                       -_CQL_GRAD_CLIPPING_VALUE,
                                       _CQL_GRAD_CLIPPING_VALUE)
         cql_alpha = jnp.exp(state.log_cql_alpha)
-        cql_alpha = jnp.clip(
-            cql_alpha, a_min=0., a_max=_CQL_COEFFICIENT_MAX_VALUE)
+        cql_alpha = jnp.clip(cql_alpha, min=0.0, max=_CQL_COEFFICIENT_MAX_VALUE)
       else:
         cql_alpha = fixed_cql_coefficient
 
@@ -337,9 +336,11 @@ class CQLLearner(acme.Learner):
           critic_grads, state.critic_optimizer_state)
       critic_params = optax.apply_updates(state.critic_params, critic_update)
 
-      new_target_critic_params = jax.tree_map(
-          lambda x, y: x * (1 - tau) + y * tau, state.target_critic_params,
-          critic_params)
+      new_target_critic_params = jax.tree.map(
+          lambda x, y: x * (1 - tau) + y * tau,
+          state.target_critic_params,
+          critic_params,
+      )
 
       metrics = {
           'critic_loss': critic_loss,

@@ -83,7 +83,7 @@ class MPOLearner(acme.Learner):
 
   _state: TrainingState
 
-  def __init__(
+  def __init__(  # pytype: disable=annotation-type-mismatch  # numpy-scalars
       self,
       critic_type: CriticType,
       discrete_policy: bool,
@@ -107,16 +107,16 @@ class MPOLearner(acme.Learner):
       retrace_lambda: float = 0.95,
       model_rollout_length: int = 0,
       optimizer: Optional[optax.GradientTransformation] = None,
-      learning_rate: Optional[Union[float, optax.Schedule]] = None,
+      learning_rate: optax.ScalarOrSchedule = 1e-4,
       dual_optimizer: Optional[optax.GradientTransformation] = None,
-      grad_norm_clip: float = 40.,
+      dual_learning_rate: optax.ScalarOrSchedule = 1e-2,
+      grad_norm_clip: float = 40.0,
       reward_clip: float = np.float32('inf'),
       value_tx_pair: rlax.TxPair = rlax.IDENTITY_PAIR,
       counter: Optional[counting.Counter] = None,
       logger: Optional[loggers.Logger] = None,
-      devices: Optional[Sequence[jax.xla.Device]] = None,
+      devices: Optional[Sequence[jax.Device]] = None,
   ):
-
     self._critic_type = critic_type
     self._discrete_policy = discrete_policy
 
@@ -207,10 +207,12 @@ class MPOLearner(acme.Learner):
           distributional_loss_fn=self._distributional_loss)
 
     # Create optimizers if they aren't given.
-    self._optimizer = optimizer or _get_default_optimizer(1e-4, grad_norm_clip)
+    self._optimizer = optimizer or _get_default_optimizer(
+        learning_rate, grad_norm_clip
+    )
     self._dual_optimizer = dual_optimizer or _get_default_optimizer(
-        1e-2, grad_norm_clip)
-    self._lr_schedule = learning_rate if callable(learning_rate) else None
+        dual_learning_rate, grad_norm_clip
+    )
 
     self._action_spec = environment_spec.actions
 
@@ -233,7 +235,7 @@ class MPOLearner(acme.Learner):
       self._dual_clip_fn = discrete_losses.clip_categorical_mpo_params
     elif isinstance(self._policy_loss_module, continuous_losses.MPO):
       is_constraining = self._policy_loss_module.per_dim_constraining
-      self._dual_clip_fn = lambda dp: continuous_losses.clip_mpo_params(  # pylint: disable=g-long-lambda
+      self._dual_clip_fn = lambda dp: continuous_losses.clip_mpo_params(  # pylint: disable=g-long-lambda  # pytype: disable=wrong-arg-types  # numpy-scalars
           dp,
           per_dim_constraining=is_constraining)
 
@@ -643,13 +645,13 @@ class MPOLearner(acme.Learner):
 
     # Periodically update target networks.
     if self._target_update_period:
-      target_params = optax.periodic_update(params, state.target_params, steps,
+      target_params = optax.periodic_update(params, state.target_params, steps,  # pytype: disable=wrong-arg-types  # numpy-scalars
                                             self._target_update_period)
     elif self._target_update_rate:
       target_params = optax.incremental_update(params, state.target_params,
                                                self._target_update_rate)
 
-    new_state = TrainingState(
+    new_state = TrainingState(  # pytype: disable=wrong-arg-types  # numpy-scalars
         params=params,
         target_params=target_params,
         dual_params=dual_params,
@@ -665,8 +667,6 @@ class MPOLearner(acme.Learner):
     metrics.update({
         'opt/grad_norm': gradients_norm,
         'opt/param_norm': optax.global_norm(params)})
-    if callable(self._lr_schedule):
-      metrics['opt/learning_rate'] = self._lr_schedule(state.steps)  # pylint: disable=not-callable
 
     dual_metrics = {
         'opt/dual_grad_norm': dual_gradients_norm,
@@ -681,7 +681,7 @@ class MPOLearner(acme.Learner):
             dual_params.log_penalty_temperature)
     elif isinstance(dual_params, discrete_losses.CategoricalMPOParams):
       dual_metrics['params/dual/log_alpha_avg'] = dual_params.log_alpha
-    metrics.update(jax.tree_map(jnp.mean, dual_metrics))
+    metrics.update(jax.tree.map(jnp.mean, dual_metrics))
 
     return new_state, metrics
 
@@ -733,15 +733,15 @@ class MPOLearner(acme.Learner):
     return [variables[name] for name in names]
 
   def save(self) -> TrainingState:
-    return jax.tree_map(mpo_utils.get_from_first_device, self._state)
+    return jax.tree.map(mpo_utils.get_from_first_device, self._state)
 
   def restore(self, state: TrainingState):
     self._state = utils.replicate_in_all_devices(state, self._local_devices)
 
 
 def _get_default_optimizer(
-    learning_rate: float,
-    max_grad_norm: Optional[float] = None) -> optax.GradientTransformation:
+    learning_rate: optax.ScalarOrSchedule, max_grad_norm: Optional[float] = None
+) -> optax.GradientTransformation:
   optimizer = optax.adam(learning_rate)
   if max_grad_norm and max_grad_norm > 0:
     optimizer = optax.chain(optax.clip_by_global_norm(max_grad_norm), optimizer)

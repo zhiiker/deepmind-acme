@@ -183,8 +183,9 @@ def mppi_planner(
   policy_prior_state = policy_prior.init(random_key)
 
   # Broadcast so that we have n_trajectories copies of each:
-  observation_t = jax.tree_map(
-      functools.partial(_repeat_n, config.n_trajectories), observation)
+  observation_t = jax.tree.map(
+      functools.partial(_repeat_n, config.n_trajectories), observation
+  )
   action_tm1 = jnp.broadcast_to(action_trajectory_tm1[0],
                                 (config.n_trajectories,) +
                                 action_trajectory_tm1[0].shape)
@@ -192,8 +193,9 @@ def mppi_planner(
   if config.previous_trajectory_clip is not None:
     action_tm1 = jnp.clip(
         action_tm1,
-        a_min=-config.previous_trajectory_clip,
-        a_max=config.previous_trajectory_clip)
+        min=-config.previous_trajectory_clip,
+        max=config.previous_trajectory_clip,
+    )
 
   # First check if planning is unnecessary:
   if config.horizon == 0:

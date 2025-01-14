@@ -237,8 +237,7 @@ class BaseAtariWrapper(abc.ABC, base.EnvironmentWrapper):
     reward = sum(timestep_t.reward for timestep_t in timestep_stack)
 
     # Multiply discount over stack (will either be 0. or 1.).
-    discount = np.product(
-        [timestep_t.discount for timestep_t in timestep_stack])
+    discount = np.prod([timestep_t.discount for timestep_t in timestep_stack])
 
     observation = self._observation_from_timestep_stack(timestep_stack)
 
@@ -298,6 +297,7 @@ class BaseAtariWrapper(abc.ABC, base.EnvironmentWrapper):
   @property
   def raw_observation(self) -> np.ndarray:
     """Returns the raw observation, after any pooling has been applied."""
+    assert self._raw_observation is not None
     return self._raw_observation
 
 
